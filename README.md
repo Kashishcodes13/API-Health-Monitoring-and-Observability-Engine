@@ -1,149 +1,29 @@
-# API Health Monitoring & Observability Engine
+# API Health Engine: frontend pack (tasks 1-9)
 
-**A centralized platform for monitoring API availability, tracking response times, detecting failures, and understanding API performance.**
+Unzip into your project root. Files overwrite `app/page.tsx` and `app/layout.tsx`/`app/globals.css`.
+No backend files are included or changed.
 
-## Overview
+## Install
+    npm i framer-motion recharts lucide-react @supabase/ssr @supabase/supabase-js
 
-API Health Monitoring & Observability Engine is a web-based platform designed to help developers monitor the health and reliability of their APIs through a centralized dashboard.
+## Assumptions (change only if wrong)
+- `lib/supabase/client.ts` exports `createClient()`; `lib/supabase/server.ts` exports async `createClient()`.
+- Tailwind v4 (`@import "tailwindcss"`). On v3 the `@theme`/`@utility` blocks must be converted.
+- `lib/frontend/actions.ts` is the ONLY file that calls your server actions. It assumes:
+  addService({name,url,method,expected_status}), checkNow(id), toggleService(id, active), deleteService(id).
+  If yours take FormData or other args, edit that one file.
+- Column names: services(id,name,url,method,expected_status,is_active,created_at),
+  health_checks(service_id,state,status_code,response_time_ms,error_message,checked_at) (mapped in normalizeCheck).
+  Types live in `lib/frontend/types.ts`. RPC/view columns are read defensively (see `lib/frontend/status.ts`).
+- Realtime must be enabled on `health_checks` and `services` (Supabase > Database > Replication).
+- Next 16: `proxy.ts` replaces `middleware.ts`.
 
-The platform aims to provide endpoint monitoring, response-time measurement, HTTP status tracking, failure detection, and historical performance insights.
+## Task map
+1 layout + glass theme + landing + wave | 2 components/StatusCard.tsx | 3 app/dashboard (stats + paging ?page=&q=)
+4 realtime in DashboardClient | 5 search (server) + status filter (client) | 6 AddServiceModal + CheckNowButton
+7 app/services/[id] | 8 login/register + proxy.ts + /auth/signout | 9 deploy.
 
-## Key Features
-
-- **API Management:** Register and manage multiple API endpoints.
-- **Health Monitoring:** Check API availability and HTTP response status.
-- **Response-Time Tracking:** Measure API response latency.
-- **Failure Detection:** Identify unavailable endpoints and request failures.
-- **Monitoring Dashboard:** View API health and performance metrics.
-- **Historical Insights:** Store and analyze previous health-check results.
-
-## Technology Stack
-
-| Component | Technology |
-|---|---|
-| Frontend | Next.js, React, TypeScript |
-| Backend | Next.js API Routes |
-| Database | Supabase PostgreSQL |
-| Styling | CSS / Tailwind CSS |
-| Version Control | Git, GitHub |
-| Development Tools | VS Code |
-
-## System Workflow
-
-1. Register an API endpoint.
-2. Execute an HTTP health check.
-3. Capture response status and response time.
-4. Evaluate API availability.
-5. Store monitoring results.
-6. Display health information through the dashboard.
-
-## Project Architecture
-
-```text
-API Health Monitoring Engine
-│
-├── Frontend
-│   ├── Dashboard
-│   ├── API Management
-│   └── Monitoring Analytics
-│
-├── Backend
-│   ├── Health Check Engine
-│   ├── API Routes
-│   └── Monitoring Scheduler
-│
-└── Database
-    ├── Monitored APIs
-    └── Health Check History
-```
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js (LTS)
-- npm
-- Git
-- Supabase account
-
-### Installation
-
-**1. Clone the repository**
-
-```bash
-git clone https://github.com/Kashishcodes13/API-Health-Monitoring-and-Observability-Engine.git
-```
-
-**2. Navigate to the project**
-
-```bash
-cd API-Health-Monitoring-and-Observability-Engine
-```
-
-**3. Install dependencies**
-
-```bash
-npm install
-```
-
-**4. Configure environment variables**
-
-Create a `.env.local` file in the root directory.
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_publishable_key
-```
-
-Use the appropriate Supabase client key for your project. Keep secret keys server-side and never commit credentials.
-
-**5. Start the development server**
-
-```bash
-npm run dev
-```
-
-Open http://localhost:3000 in your browser.
-
-## Development Roadmap
-
-- [x] Initial Next.js project setup
-- [x] Git and GitHub integration
-- [ ] Supabase database configuration
-- [ ] API endpoint registration
-- [ ] Health-check execution engine
-- [ ] Response-time measurement
-- [ ] API status monitoring
-- [ ] Dashboard development
-- [ ] Historical monitoring analytics
-- [ ] Automated periodic health checks
-- [ ] Alert and notification system
-
-## Future Enhancements
-
-- Uptime percentage analytics
-- Configurable monitoring intervals
-- Response-time visualization
-- Failure notifications
-- Multi-endpoint monitoring
-- Advanced observability metrics
-
-## Security
-
-- Implement Row Level Security (RLS).
-- Validate registered API endpoints.
-- Protect sensitive environment variables.
-- Apply request timeouts and error handling.
-- Keep privileged database credentials server-side.
-
-## Contribution
-
-Suggestions, feedback, and contributions are welcome.
-
-## License
-
-License information will be added in a future release.
-
----
-
-**Project Status:** Under Development
+## Task 8 order
+1. Register and log in with DEV_SKIP_AUTH unset. 2. Run sql/04_lockdown.sql. 3. Delete DEV_SKIP_AUTH from env and the 3-line check in proxy.ts.
+## Task 9
+Set env vars on host (service role key server-only, never NEXT_PUBLIC_), deploy, then run sql/05.
