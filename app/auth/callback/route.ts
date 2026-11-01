@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-// Handles OAuth (Google/GitHub), email-confirmation and password-reset links.
+// Handles the links Supabase emails: confirm-your-email and reset-your-password.
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");

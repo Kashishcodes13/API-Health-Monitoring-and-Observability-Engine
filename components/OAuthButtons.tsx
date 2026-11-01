@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
@@ -17,10 +17,32 @@ const GitHub = () => (
   </svg>
 );
 
-export function OAuthButtons({ onError, verb }: { onError: (m: string) => void; verb: string }) {
-  const [busy, setBusy] = useState<string | null>(null);
+type Provider = "google" | "github";
 
-  async function go(provider: "google" | "github") {
+export function OAuthButtons({ onError, verb }: { onError: (m: string) => void; verb: string }) {
+  const [busy, setBusy] = useState<Provider | null>(null);
+  // null = unknown yet (buttons stay usable); false = provider is switched off in Supabase
+  const [enabled, setEnabled] = useState<Record<Provider, boolean | null>>({ google: null, github: null });
+
+  // Ask Supabase which providers are enabled so we never send people to a raw JSON error page.
+  useEffect(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return;
+    fetch(`${url}/auth/v1/settings`, { headers: { apikey: key } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        const ext = j?.external;
+        if (ext) setEnabled({ google: !!ext.google, github: !!ext.github });
+      })
+      .catch(() => {});
+  }, []);
+
+  async function go(provider: Provider) {
+    if (enabled[provider] === false) {
+      onError(`${provider === "google" ? "Google" : "GitHub"} sign-in is not enabled yet. Turn it on in Supabase → Authentication → Providers.`);
+      return;
+    }
     setBusy(provider);
     const { error } = await createClient().auth.signInWithOAuth({
       provider,
@@ -29,15 +51,20 @@ export function OAuthButtons({ onError, verb }: { onError: (m: string) => void; 
     if (error) { onError(error.message); setBusy(null); }
   }
 
-  const btn = "glass inline-flex w-full items-center justify-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-medium transition hover:border-white/25 disabled:opacity-60";
+  const btn = "glass inline-flex w-full items-center justify-center gap-2.5 rounded-xl px-4 py-2.5 text-sm font-semibold text-text transition hover:-translate-y-px disabled:opacity-60";
+  const items: { p: Provider; label: string; Icon: () => React.JSX.Element }[] = [
+    { p: "google", label: "Google", Icon: Google },
+    { p: "github", label: "GitHub", Icon: GitHub },
+  ];
   return (
     <div className="grid gap-2.5 sm:grid-cols-2">
-      <button type="button" disabled={!!busy} onClick={() => go("google")} className={btn}>
-        {busy === "google" ? <Loader2 className="size-4 animate-spin" /> : <Google />} {verb} with Google
-      </button>
-      <button type="button" disabled={!!busy} onClick={() => go("github")} className={btn}>
-        {busy === "github" ? <Loader2 className="size-4 animate-spin" /> : <GitHub />} {verb} with GitHub
-      </button>
+      {items.map(({ p, label, Icon }) => (
+        <button key={p} type="button" disabled={!!busy} onClick={() => go(p)} className={`${btn} ${enabled[p] === false ? "opacity-60" : ""}`}
+          title={enabled[p] === false ? "Not enabled yet in Supabase" : undefined}>
+          {busy === p ? <Loader2 className="size-4 animate-spin" /> : <Icon />} {verb} with {label}
+          {enabled[p] === false && <span className="rounded-full bg-text/8 px-1.5 py-0.5 text-[10px] font-medium text-muted">off</span>}
+        </button>
+      ))}
     </div>
   );
 }

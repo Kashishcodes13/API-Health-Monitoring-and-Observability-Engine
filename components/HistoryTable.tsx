@@ -22,7 +22,7 @@ export function HistoryTable({ rows }: { rows: CheckRow[] }) {
           {rows.map((r, i) => {
             const t = TONE[r.status];
             return (
-              <tr key={`${r.checked_at}-${i}`} className="border-t border-white/6">
+              <tr key={`${r.checked_at}-${i}`} className="border-t border-text/8">
                 <td className="whitespace-nowrap px-3 py-2.5 text-muted"><LocalTime iso={r.checked_at} /></td>
                 <td className={`px-3 py-2.5 font-medium ${t.text}`}>
                   <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-current" />{t.label}</span>

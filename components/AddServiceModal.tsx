@@ -1,29 +1,38 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, Plus, X } from "lucide-react";
 import { addServiceAction } from "@/lib/frontend/actions";
+import { DEFAULT_KEYS, type FieldKeys } from "@/lib/frontend/service";
 
 const METHODS = ["GET", "HEAD", "POST"];
 
-export function AddServiceModal() {
+export function AddServiceModal({ keys = DEFAULT_KEYS }: { keys?: FieldKeys }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  useEffect(() => {
+    const openIt = () => setOpen(true);
+    window.addEventListener("open-add-service", openIt);
+    return () => window.removeEventListener("open-add-service", openIt);
+  }, []);
+
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    let url = String(f.get("url") ?? "").trim();
+    if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = `https://${url}`; // "api.example.com" -> https://...
     setError(null);
     start(async () => {
       const res = await addServiceAction({
         name: String(f.get("name") ?? "").trim(),
-        url: String(f.get("url") ?? "").trim(),
+        url,
         method: String(f.get("method") ?? "GET"),
         expected_status: Number(f.get("expected_status") ?? 200),
-      });
+      }, keys);
       if (!res.ok) return setError(res.error ?? "Could not add service");
       setOpen(false);
       router.refresh();
@@ -39,7 +48,7 @@ export function AddServiceModal() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-50 grid place-items-center bg-slate-900/35 p-4 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -57,7 +66,7 @@ export function AddServiceModal() {
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold">Add a service</h2>
-                <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="text-muted hover:text-white">
+                <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="text-muted hover:text-text">
                   <X className="size-5" />
                 </button>
               </div>
@@ -67,13 +76,14 @@ export function AddServiceModal() {
               </label>
               <label className="block space-y-1.5 text-sm text-muted">
                 URL
-                <input name="url" type="url" required placeholder="https://api.example.com/health" className="input-glass font-mono" />
+                <input name="url" type="text" inputMode="url" required placeholder="https://api.example.com/health" className="input-glass font-mono" />
+                <span className="block text-xs text-muted/80">Public https:// address. We add https:// if you leave it out.</span>
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block space-y-1.5 text-sm text-muted">
                   Method
                   <select name="method" defaultValue="GET" className="input-glass">
-                    {METHODS.map((m) => <option key={m} value={m} className="bg-ink-2">{m}</option>)}
+                    {METHODS.map((m) => <option key={m} value={m} className="bg-white">{m}</option>)}
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm text-muted">

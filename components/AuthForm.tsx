@@ -2,13 +2,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Activity, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { Alerts, AuthShell } from "./AuthShell";
 
-export function AuthForm({ mode }: { mode: "login" | "register" }) {
+export function AuthForm({ mode, authError = false }: { mode: "login" | "register"; authError?: boolean }) {
   const router = useRouter();
   const isLogin = mode === "login";
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(authError ? "Sign-in failed or the link expired. Please try again." : null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,8 +18,11 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     const f = new FormData(e.currentTarget);
     const email = String(f.get("email")).trim();
     const password = String(f.get("password"));
-    setError(null); setNotice(null); setLoading(true);
+    setError(null); setNotice(null);
 
+    if (!isLogin && password !== String(f.get("confirm"))) return setError("Passwords do not match.");
+
+    setLoading(true);
     const supabase = createClient();
     if (isLogin) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -28,7 +32,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       router.refresh();
     } else {
       const { data, error } = await supabase.auth.signUp({
-        email, password, options: { emailRedirectTo: `${location.origin}/dashboard` },
+        email, password, options: { emailRedirectTo: `${location.origin}/auth/callback?next=/dashboard` },
       });
       setLoading(false);
       if (error) return setError(error.message);
@@ -38,40 +42,38 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center px-5 py-10">
-      <div className="w-full max-w-md">
-        <Link href="/" className="mb-6 flex items-center justify-center gap-2 font-semibold">
-          <span className="grid size-9 place-items-center rounded-xl bg-linear-to-br from-brand to-brand-2">
-            <Activity className="size-4 text-white" />
-          </span>
-          API Health Engine
-        </Link>
-        <form onSubmit={onSubmit} className="glass-strong space-y-4 rounded-3xl p-7">
-          <div>
-            <h1 className="text-2xl font-bold">{isLogin ? "Welcome back" : "Create your account"}</h1>
-            <p className="mt-1 text-sm text-muted">{isLogin ? "Log in to see your dashboard." : "Start monitoring in under a minute."}</p>
-          </div>
-          <label className="block space-y-1.5 text-sm text-muted">
-            Email
-            <input name="email" type="email" required autoComplete="email" placeholder="you@company.com" className="input-glass" />
-          </label>
-          <label className="block space-y-1.5 text-sm text-muted">
+    <AuthShell
+      title={isLogin ? "Welcome back" : "Create your account"}
+      subtitle={isLogin ? "Log in to see your dashboard." : "Start monitoring in under a minute."}
+    >
+      <form onSubmit={onSubmit} className="space-y-4">
+        <label className="block space-y-1.5 text-sm text-muted">
+          Email
+          <input name="email" type="email" required autoComplete="email" placeholder="you@gmail.com" className="input-glass" />
+        </label>
+        <label className="block space-y-1.5 text-sm text-muted">
+          <span className="flex items-center justify-between">
             Password
-            <input name="password" type="password" required minLength={8} autoComplete={isLogin ? "current-password" : "new-password"} placeholder="At least 8 characters" className="input-glass" />
+            {isLogin && <Link href="/forgot-password" className="text-xs text-brand-2 hover:underline">Forgot password?</Link>}
+          </span>
+          <input name="password" type="password" required minLength={8} autoComplete={isLogin ? "current-password" : "new-password"} placeholder="At least 8 characters" className="input-glass" />
+        </label>
+        {!isLogin && (
+          <label className="block space-y-1.5 text-sm text-muted">
+            Confirm password
+            <input name="confirm" type="password" required minLength={8} autoComplete="new-password" placeholder="Repeat your password" className="input-glass" />
           </label>
-          {error && <p role="alert" className="rounded-lg bg-down/10 px-3 py-2 text-sm text-down">{error}</p>}
-          {notice && <p role="status" className="rounded-lg bg-healthy/10 px-3 py-2 text-sm text-healthy">{notice}</p>}
-          <button type="submit" disabled={loading} className="btn-primary w-full">
-            {loading && <Loader2 className="size-4 animate-spin" />} {isLogin ? "Log in" : "Create account"}
-          </button>
-          <p className="text-center text-sm text-muted">
-            {isLogin ? "No account? " : "Already registered? "}
-            <Link href={isLogin ? "/register" : "/login"} className="text-brand-2 hover:underline">
-              {isLogin ? "Register" : "Log in"}
-            </Link>
-          </p>
-        </form>
-      </div>
-    </main>
+        )}
+        <Alerts error={error} notice={notice} />
+        <button type="submit" disabled={loading} className="btn-primary w-full">
+          {loading && <Loader2 className="size-4 animate-spin" />} {isLogin ? "Log in" : "Create account"}
+        </button>
+      </form>
+
+      <p className="text-center text-sm text-muted">
+        {isLogin ? "No account? " : "Already registered? "}
+        <Link href={isLogin ? "/register" : "/login"} className="text-brand-2 hover:underline">{isLogin ? "Register" : "Log in"}</Link>
+      </p>
+    </AuthShell>
   );
 }

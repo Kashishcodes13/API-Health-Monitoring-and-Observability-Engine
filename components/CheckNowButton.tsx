@@ -20,7 +20,7 @@ export function CheckNowButton({ serviceId, label = false }: { serviceId: string
           router.refresh();
         })
       }
-      className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs text-muted transition hover:text-white disabled:opacity-60"
+      className="glass inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs text-muted transition hover:text-text disabled:opacity-60"
     >
       {pending ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
       {label && (pending ? "Checking…" : "Check now")}

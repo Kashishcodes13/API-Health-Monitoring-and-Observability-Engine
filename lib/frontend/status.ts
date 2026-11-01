@@ -25,9 +25,9 @@ export function pickStr(obj: unknown, ...keys: string[]): string | null {
   return null;
 }
 
-export function timeAgo(iso?: string | null): string {
+export function timeAgo(iso?: string | null, now: number = Date.now()): string {
   if (!iso) return "never";
-  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  const s = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 1000));
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
@@ -56,4 +56,33 @@ export function normalizeCheck(raw: unknown): CheckRow {
     checked_at: String(r.checked_at),
     response_headers: (r.response_headers as Record<string, string> | null) ?? null,
   };
+}
+
+export function sinceIso(hours: number): string {
+  return new Date(Date.now() - hours * 3600_000).toISOString();
+}
+
+/** Tolerant services-row mapping lives in ./service (detects URL/name/method columns). */
+export { normalizeService } from "./service";
+
+/** Text used for search: every human-readable string field (skips ids and timestamps). */
+export function searchText(raw: unknown): string {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return Object.values(r)
+    .filter(
+      (v): v is string =>
+        typeof v === "string" &&
+        v.length < 300 &&
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v) &&
+        !/^\d{4}-\d{2}-\d{2}T/.test(v),
+    )
+    .join(" ")
+    .toLowerCase();
+}
+
+export function median(nums: number[]): number | null {
+  if (!nums.length) return null;
+  const a = [...nums].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }

@@ -8,7 +8,7 @@ import { CheckNowButton } from "./CheckNowButton";
 export function ServiceActions({ id, active }: { id: string; active: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const btn = "glass inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs transition hover:text-white disabled:opacity-60";
+  const btn = "glass inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs transition hover:text-text disabled:opacity-60";
 
   return (
     <div className="flex flex-wrap items-center gap-2">
