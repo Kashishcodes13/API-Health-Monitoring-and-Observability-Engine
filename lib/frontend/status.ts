@@ -86,3 +86,28 @@ export function median(nums: number[]): number | null {
   const m = Math.floor(a.length / 2);
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
+
+/** Colour classes for an HTTP status code pill (2xx green, 3xx blue, 4xx amber, 5xx red). */
+export function codeTone(code?: number | null): string {
+  if (code == null) return "bg-text/8 text-muted";
+  if (code < 300) return "bg-healthy/12 text-healthy";
+  if (code < 400) return "bg-brand-2/12 text-brand-2";
+  if (code < 500) return "bg-degraded/12 text-degraded";
+  return "bg-down/12 text-down";
+}
+
+/** Soft badge colours per status, for dark surfaces. */
+export const BADGE: Record<Status, string> = {
+  healthy: "bg-healthy/12 text-healthy",
+  degraded: "bg-degraded/12 text-degraded",
+  down: "bg-down/12 text-down",
+  unknown: "bg-text/8 text-muted",
+};
+
+export const asStatus = (v: unknown): Status => (v === "healthy" || v === "degraded" || v === "down" ? v : "unknown");
+
+/** Path part of a URL for compact display; falls back to the raw text. */
+export function urlPath(url?: string | null): string {
+  if (!url) return "—";
+  try { const u = new URL(url); return `${u.pathname}${u.search}` || "/"; } catch { return url; }
+}

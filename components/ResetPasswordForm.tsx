@@ -27,12 +27,12 @@ export function ResetPasswordForm() {
   return (
     <AuthShell title="Choose a new password" subtitle="Use at least 8 characters.">
       <form onSubmit={onSubmit} className="space-y-4">
-        <label className="block space-y-1.5 text-sm text-muted">
-          New password
+        <label className="block space-y-1.5">
+          <span className="label-mono">New password</span>
           <input name="password" type="password" required minLength={8} autoComplete="new-password" className="input-glass" />
         </label>
-        <label className="block space-y-1.5 text-sm text-muted">
-          Confirm password
+        <label className="block space-y-1.5">
+          <span className="label-mono">Confirm password</span>
           <input name="confirm" type="password" required minLength={8} autoComplete="new-password" className="input-glass" />
         </label>
         <Alerts error={error} notice={notice} />

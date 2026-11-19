@@ -1,4 +1,5 @@
 import type { CheckRow, ServiceRow } from "./types";
+import { pickNum, pickStr } from "./status";
 
 export const HOUR = 3_600_000;
 export const nowMs = () => Date.now();
@@ -141,4 +142,94 @@ export function dailyUptime(checks: CheckRow[], days: number, now: number) {
     const cell = by.get(day);
     return { day, pct: cell ? (cell.ok / cell.n) * 100 : null };
   });
+}
+
+/* ---------- chart time ranges (dashboard and service page share these) ---------- */
+export type RangeKey = "1h" | "12h" | "24h" | "7d" | "30d";
+
+/** `bucket` = minutes per point, chosen so every range draws roughly 60 to 170 points. */
+export const RANGES: Record<RangeKey, { hours: number; bucket: number; label: string }> = {
+  "1h": { hours: 1, bucket: 1, label: "1 hour" },
+  "12h": { hours: 12, bucket: 10, label: "12 hours" },
+  "24h": { hours: 24, bucket: 15, label: "24 hours" },
+  "7d": { hours: 168, bucket: 60, label: "7 days" },
+  "30d": { hours: 720, bucket: 360, label: "30 days" },
+};
+export const RANGE_KEYS = Object.keys(RANGES) as RangeKey[];
+
+export interface BucketRow { t: number; value: number }
+
+/** Reads rows from the latency_buckets() database function (column names are tolerated). */
+export function parseBuckets(rows: unknown): BucketRow[] {
+  if (!Array.isArray(rows)) return [];
+  const out: BucketRow[] = [];
+  for (const r of rows) {
+    const t = Date.parse(pickStr(r, "bucket", "bucket_start", "ts", "time") ?? "");
+    const v = pickNum(r, "avg_ms", "avg_latency_ms", "avg_latency", "avg");
+    if (!Number.isNaN(t) && v != null) out.push({ t, value: Math.round(v) });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/** Joins one bucket list per service into chart rows (one row per timestamp). */
+export function mergeSeries(parts: { id: string; name: string; rows: BucketRow[] }[]): Fleet {
+  const live = parts.filter((p) => p.rows.length);
+  const times = Array.from(new Set(live.flatMap((p) => p.rows.map((r) => r.t)))).sort((a, b) => a - b);
+  const maps = live.map((p) => new Map(p.rows.map((r) => [r.t, r.value] as const)));
+  const data = times.map((t) => {
+    const row: Record<string, number | null> = { t };
+    live.forEach((p, i) => { row[p.id] = maps[i].get(t) ?? null; });
+    return row;
+  });
+  return { data, series: live.map((p) => ({ id: p.id, name: p.name })) };
+}
+
+/* ---------- KPI helpers ---------- */
+
+/** Uptime % and average latency per hour for the last `hours` hours (null = no checks that hour). */
+export function hourlySeries(checks: CheckRow[], now: number, hours = 24) {
+  const start = Math.floor((now - hours * HOUR) / HOUR) * HOUR;
+  const n = hours + 1;
+  const ups = Array.from({ length: n }, () => ({ ok: 0, n: 0 }));
+  const lats = Array.from({ length: n }, () => ({ sum: 0, n: 0 }));
+  for (const c of checks) {
+    const t = ts(c);
+    if (t < start) continue;
+    const i = Math.floor((t - start) / HOUR);
+    if (i < 0 || i >= n) continue;
+    ups[i].n += 1;
+    if (up(c)) ups[i].ok += 1;
+    if (hasLat(c)) { lats[i].sum += c.latency_ms as number; lats[i].n += 1; }
+  }
+  return {
+    uptime: ups.map((b) => (b.n ? (b.ok / b.n) * 100 : null)),
+    latency: lats.map((b) => (b.n ? Math.round(b.sum / b.n) : null)),
+  };
+}
+
+export interface Band { label: string; count: number; pct: number; color: string }
+
+/** Latency distribution for the last 24 hours in four readable bands. */
+export function latencyBands(checks: CheckRow[], now: number): { bands: Band[]; total: number } {
+  const lat = checks.filter((c) => ts(c) >= now - 24 * HOUR && hasLat(c)).map((c) => c.latency_ms as number);
+  const defs: [string, number, number, string][] = [
+    ["Under 100 ms", 0, 100, "#22c55e"],
+    ["100 - 300 ms", 100, 300, "#3b82f6"],
+    ["300 - 500 ms", 300, 500, "#a78bfa"],
+    ["500 ms and above", 500, Infinity, "#f59e0b"],
+  ];
+  const total = lat.length;
+  return {
+    total,
+    bands: defs.map(([label, lo, hi, color]) => {
+      const count = lat.filter((v) => v >= lo && v < hi).length;
+      return { label, count, pct: total ? (count / total) * 100 : 0, color };
+    }),
+  };
+}
+
+/** 24 hour uptime for one service, or null when it has no checks in that window. */
+export function serviceUptime(rows: CheckRow[] | undefined, now: number): number | null {
+  const win = (rows ?? []).filter((c) => ts(c) >= now - 24 * HOUR);
+  return win.length ? (win.filter(up).length / win.length) * 100 : null;
 }

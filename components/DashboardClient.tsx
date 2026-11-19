@@ -1,37 +1,41 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Radio, Search, ServerOff } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Loader2, Plus, Radio, Search, ServerOff } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { CheckRow, ServiceRow, Status } from "@/lib/frontend/types";
 import { normalizeCheck } from "@/lib/frontend/status";
 import { filterServices } from "@/lib/frontend/service";
-import { computeStats, fleetSeries, groupByService, latestByService, sparkValues } from "@/lib/frontend/analytics";
+import {
+  RANGES, RANGE_KEYS, bucketSeries, computeStats, groupByService, hourlySeries, latencyBands, latestByService,
+  mergeSeries, parseBuckets, serviceUptime, sparkValues, type Fleet, type RangeKey,
+} from "@/lib/frontend/analytics";
 import { checkNowAction } from "@/lib/frontend/actions";
 import { StatusCard } from "./StatusCard";
-import { StatsBento } from "./StatsBento";
-import { FleetChart, StatusDonut } from "./ChartsLazy";
+import { KpiTiles } from "./KpiTiles";
+import { Topology } from "./Topology";
+import { RecentLogs } from "./RecentLogs";
+import { FleetChart } from "./ChartsLazy";
 
 const PAGE_SIZE = 9;
+const OVERVIEW_COUNT = 6;
 const AUTO_MS = 60_000;   // auto-monitor interval
 const FLUSH_MS = 800;     // realtime events are applied in ONE batch per window
 const MAX_CHECKS = 2000;
 
-const FILTERS: { key: Status | "all"; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "healthy", label: "Healthy" },
-  { key: "degraded", label: "Degraded" },
-  { key: "down", label: "Down" },
-];
+const tabs = "glass flex rounded-lg p-0.5";
+const tab = (on: boolean) =>
+  `rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${on ? "bg-brand text-white" : "text-muted hover:text-text"}`;
 
 export function DashboardClient({
-  services,
-  initialChecks,
-  serverNow,
-  initialQ,
-  initialPage,
+  mode, title, subtitle, addSlot, services, initialChecks, serverNow, initialQ, initialPage,
 }: {
+  mode: "overview" | "services";
+  title: string;
+  subtitle: string;
+  addSlot?: React.ReactNode;
   services: ServiceRow[];
   initialChecks: CheckRow[];
   serverNow: number;
@@ -39,6 +43,7 @@ export function DashboardClient({
   initialPage: number;
 }) {
   const router = useRouter();
+  const overview = mode === "overview";
   const [checks, setChecks] = useState(initialChecks);
   const [filter, setFilter] = useState<Status | "all">("all");
   const [query, setQuery] = useState(initialQ);
@@ -47,6 +52,8 @@ export function DashboardClient({
   const [auto, setAuto] = useState(true);
   const [running, setRunning] = useState(false);
   const [now, setNow] = useState(serverNow);
+  const [range, setRange] = useState<RangeKey>("24h");
+  const [chart, setChart] = useState<{ fleet: Fleet; loading: boolean }>({ fleet: { data: [], series: [] }, loading: true });
 
   const idsRef = useRef(new Set<string>());
   const activeRef = useRef<ServiceRow[]>([]);
@@ -67,7 +74,7 @@ export function DashboardClient({
     return () => clearInterval(t);
   }, []);
 
-  // Realtime: every new health check lands here instantly.
+  // Realtime: every new health check lands here, applied in one batch per 800 ms.
   useEffect(() => {
     const supabase = createClient();
     const flush = () => {
@@ -83,7 +90,7 @@ export function DashboardClient({
       setNow(Date.now());
     };
     const channel = supabase
-      .channel("dashboard-live")
+      .channel(`board-live-${mode}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "health_checks" }, (payload) => {
         const row = normalizeCheck(payload.new);
         if (!idsRef.current.has(row.service_id)) return;
@@ -96,9 +103,9 @@ export function DashboardClient({
       if (timerRef.current) clearTimeout(timerRef.current);
       supabase.removeChannel(channel);
     };
-  }, [router]);
+  }, [router, mode]);
 
-  // Auto-monitor: probes every active service on a timer while the dashboard is open.
+  // Auto-monitor: probes every active service on a timer while the page is open.
   useEffect(() => {
     if (!auto) return;
     let cancelled = false;
@@ -126,84 +133,191 @@ export function DashboardClient({
   const latest = useMemo(() => latestByService(checks), [checks]);
   const grouped = useMemo(() => groupByService(checks), [checks]);
   const stats = useMemo(() => computeStats(services, latest, checks, now), [services, latest, checks, now]);
-  const fleet = useMemo(() => fleetSeries(services, checks, now), [services, checks, now]);
+  const hourly = useMemo(() => hourlySeries(checks, now), [checks, now]);
+  const bands = useMemo(() => latencyBands(checks, now), [checks, now]);
+  const recent = useMemo(
+    () => [...checks].sort((a, b) => Date.parse(b.checked_at) - Date.parse(a.checked_at)).slice(0, 6),
+    [checks],
+  );
 
+  // ---- latency chart: the busiest active services (max 5), series come from the database per range ----
+  const chartServices = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of checks) counts[c.service_id] = (counts[c.service_id] ?? 0) + 1;
+    return services
+      .filter((s) => s.is_active !== false)
+      .sort((a, b) => (counts[b.id] ?? 0) - (counts[a.id] ?? 0))
+      .slice(0, 5);
+  }, [services, checks]);
+  const chartKey = chartServices.map((s) => s.id).join(",");
+  const chartSvcRef = useRef(chartServices);
+  const checksRef = useRef(checks);
+  useEffect(() => { chartSvcRef.current = chartServices; checksRef.current = checks; });
+
+  useEffect(() => {
+    if (!overview) return;
+    let cancelled = false;
+    const cfg = RANGES[range];
+    const load = async (first: boolean) => {
+      const list = chartSvcRef.current;
+      if (first) setChart((p) => ({ ...p, loading: true }));
+      const supabase = createClient();
+      const at = Date.now();
+      const parts = await Promise.all(
+        list.map(async (s) => {
+          const { data, error } = await supabase.rpc("latency_buckets", {
+            p_service_id: s.id, p_hours: cfg.hours, p_bucket_minutes: cfg.bucket,
+          });
+          // database function unavailable: fall back to the checks already loaded
+          const rows = error
+            ? bucketSeries(checksRef.current.filter((c) => c.service_id === s.id), at, cfg.hours, cfg.bucket)
+            : parseBuckets(data);
+          const from = at - cfg.hours * 3_600_000 - cfg.bucket * 60_000;
+          return { id: s.id, name: s.name, rows: rows.filter((r) => r.t >= from) };
+        }),
+      );
+      if (!cancelled) setChart({ fleet: mergeSeries(parts), loading: false });
+    };
+    load(true);
+    const iv = setInterval(() => { if (!document.hidden) load(false); }, 30_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [overview, range, chartKey]);
+
+  // ---- services list: filter, search, page ----
   const filtered = useMemo(
     () => filterServices(services, query).filter((s) => filter === "all" || latest[s.id]?.status === filter),
     [services, query, filter, latest],
   );
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const pageItems = useMemo(() => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE), [filtered, safePage]);
+  const shown = useMemo(
+    () => (overview ? filtered.slice(0, OVERVIEW_COUNT) : filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)),
+    [overview, filtered, safePage],
+  );
   const sparks = useMemo(() => {
     const o: Record<string, (number | null)[]> = {};
-    for (const s of pageItems) o[s.id] = sparkValues(grouped[s.id]);
+    for (const s of shown) o[s.id] = sparkValues(grouped[s.id]);
     return o;
-  }, [pageItems, grouped]);
+  }, [shown, grouped]);
+  const uptimes = useMemo(() => {
+    const o: Record<string, number | null> = {};
+    for (const s of shown) o[s.id] = serviceUptime(grouped[s.id], now);
+    return o;
+  }, [shown, grouped, now]);
 
-  // shareable URL without a server round-trip
+  // shareable URL for the services page (search and page) without a server round-trip
   useEffect(() => {
+    if (overview) return;
     const p = new URLSearchParams();
     if (query.trim()) p.set("q", query.trim());
     if (safePage > 1) p.set("page", String(safePage));
     const qs = p.toString();
-    window.history.replaceState(null, "", qs ? `/dashboard?${qs}` : "/dashboard");
-  }, [query, safePage]);
+    window.history.replaceState(null, "", qs ? `/services?${qs}` : "/services");
+  }, [overview, query, safePage]);
 
-  const btn = "glass grid h-9 min-w-9 place-items-center rounded-xl px-3 text-sm transition hover:border-brand/40 disabled:opacity-40";
+  const counts: Record<string, number> = { all: services.length, healthy: stats.healthy, degraded: stats.degraded, down: stats.down };
+  const filters: { key: Status | "all"; label: string }[] = [
+    { key: "all", label: "All" }, { key: "healthy", label: "Healthy" }, { key: "degraded", label: "Degraded" }, { key: "down", label: "Down" },
+  ];
+  const pageBtn = "glass grid h-9 min-w-9 place-items-center rounded-lg px-3 text-sm transition-colors hover:border-text/30 disabled:opacity-40";
 
   return (
-    <>
-      <StatsBento stats={stats} />
-
-      <div className="bento-grid mt-4">
-        <section className="glass bento-card md:col-span-4">
-          <h2 className="mb-3 font-semibold">Latency · last 24h</h2>
-          <FleetChart data={fleet.data} series={fleet.series} />
-        </section>
-        <section className="glass bento-card md:col-span-2">
-          <h2 className="mb-3 font-semibold">Status mix</h2>
-          <StatusDonut healthy={stats.healthy} degraded={stats.degraded} down={stats.down} />
-        </section>
+    <div className="space-y-6">
+      {/* header */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
+          <p className="mt-1 text-sm text-muted">{subtitle}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`glass inline-flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-[11px] font-bold uppercase ${live ? "text-healthy" : "text-muted"}`} title="Realtime connection">
+            <span className={live ? "status-dot" : "inline-block size-2 rounded-full bg-muted"} /> {live ? "Live" : "Connecting"}
+          </span>
+          <button type="button" onClick={() => setAuto((a) => !a)} aria-pressed={auto}
+            title={`Probe every service every ${AUTO_MS / 1000}s while this page is open`}
+            className={`glass inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${auto ? "text-brand-2" : "text-muted"}`}>
+            {running ? <Loader2 className="size-3.5 animate-spin" /> : <Radio className="size-3.5" />}
+            Auto-monitor {auto ? "on" : "off"}
+          </button>
+          {addSlot}
+        </div>
       </div>
 
-      <section className="mt-8">
-        <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative lg:w-80">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted" />
-            <input
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
-              placeholder="Search name or URL…"
-              aria-label="Search services"
-              className="input-glass pl-10"
-            />
+      {overview && (
+        <>
+          <KpiTiles stats={stats} uptimeSpark={hourly.uptime} latencySpark={hourly.latency} />
+
+          <div className="grid gap-4 xl:grid-cols-3">
+            <section className="glass rounded-xl p-5 xl:col-span-2">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-bold">API response time overview</h2>
+                  <p className="label-mono mt-1">Average latency · last {RANGES[range].label}</p>
+                </div>
+                <div className={tabs} role="tablist" aria-label="Chart time range">
+                  {RANGE_KEYS.map((r) => (
+                    <button key={r} type="button" role="tab" aria-selected={range === r} onClick={() => setRange(r)} className={tab(range === r)}>{r}</button>
+                  ))}
+                </div>
+              </div>
+              <FleetChart data={chart.fleet.data} series={chart.fleet.series} range={range} loading={chart.loading}
+                windowMs={RANGES[range].hours * 3_600_000} now={now} />
+            </section>
+
+            <section className="glass flex flex-col rounded-xl p-5">
+              <h2 className="font-bold">API latency distribution</h2>
+              <p className="label-mono mt-1">Checks analysed · {bands.total.toLocaleString()}</p>
+              <ul className="mt-5 flex flex-1 flex-col justify-center gap-5">
+                {bands.bands.map((b) => (
+                  <li key={b.label}>
+                    <div className="mb-1.5 flex items-baseline justify-between text-xs">
+                      <span className="text-text">{b.label}</span>
+                      <span className="font-mono text-muted">{b.count.toLocaleString()} · {Math.round(b.pct)}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-text/10">
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${b.pct}%`, background: b.color }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-5 rounded-lg bg-text/5 px-3 py-2 font-mono text-[11px] text-muted">Degraded threshold · 500 ms</p>
+            </section>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="glass flex rounded-2xl p-1" role="tablist" aria-label="Filter by status">
-              {FILTERS.map((f) => (
-                <button key={f.key} role="tab" aria-selected={filter === f.key}
-                  onClick={() => { setFilter(f.key); setPage(1); }}
-                  className={`rounded-xl px-3 py-1.5 text-xs transition ${filter === f.key ? "bg-white text-brand shadow-sm" : "text-muted hover:text-text"}`}>
-                  {f.label}
+        </>
+      )}
+
+      {/* services */}
+      <section id="services" className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {overview ? (
+            <h2 className="text-lg font-bold">Monitored services</h2>
+          ) : (
+            <div className="relative w-full sm:w-80">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted" />
+              <input value={query} onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+                placeholder="Search name or URL…" aria-label="Search services" className="input-glass pl-9" />
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className={tabs} role="tablist" aria-label="Filter by status">
+              {filters.map((f) => (
+                <button key={f.key} type="button" role="tab" aria-selected={filter === f.key}
+                  onClick={() => { setFilter(f.key); setPage(1); }} className={tab(filter === f.key)}>
+                  {f.label} <span className="ml-1 font-mono opacity-70">{counts[f.key]}</span>
                 </button>
               ))}
             </div>
-            <button onClick={() => setAuto((a) => !a)} aria-pressed={auto}
-              title={`Probe every service every ${AUTO_MS / 1000}s while this page is open`}
-              className={`glass inline-flex items-center gap-2 rounded-2xl px-3.5 py-2 text-xs transition ${auto ? "text-brand-2" : "text-muted"}`}>
-              {running ? <Loader2 className="size-3.5 animate-spin" /> : <Radio className="size-3.5" />}
-              Auto-monitor {auto ? "on" : "off"}
-            </button>
-            <span className={`flex items-center gap-1.5 text-xs ${live ? "text-healthy" : "text-muted"}`} title="Realtime connection">
-              <span className={live ? "status-dot" : "inline-block size-2 rounded-full bg-muted"} /> {live ? "Live" : "Connecting"}
-            </span>
+            {overview && (
+              <Link href="/services" className="inline-flex items-center gap-1 text-xs font-semibold text-brand-2 hover:underline">
+                View all services <ArrowRight className="size-3.5" />
+              </Link>
+            )}
           </div>
         </div>
 
-        {pageItems.length === 0 ? (
-          <div className="glass grid place-items-center gap-3 rounded-3xl px-6 py-16 text-center text-muted">
-            <span className="grid size-14 place-items-center rounded-2xl bg-brand/10 text-brand"><ServerOff className="size-7" /></span>
+        {shown.length === 0 ? (
+          <div className="glass grid place-items-center gap-3 rounded-xl px-6 py-14 text-center text-muted">
+            <span className="grid size-12 place-items-center rounded-xl bg-brand/12 text-brand"><ServerOff className="size-6" /></span>
             {services.length === 0 ? (
               <>
                 <p className="text-lg font-semibold text-text">Add your first API</p>
@@ -219,38 +333,56 @@ export function DashboardClient({
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <AnimatePresence initial={false}>
-              {pageItems.map((s) => (
-                <StatusCard key={s.id} service={s} check={latest[s.id]} spark={sparks[s.id]} now={now} />
+              {shown.map((s) => (
+                <StatusCard key={s.id} service={s} check={latest[s.id]} spark={sparks[s.id]} uptime={uptimes[s.id]} now={now} />
               ))}
             </AnimatePresence>
           </div>
         )}
 
-        {totalPages > 1 && (
-          <nav aria-label="Pagination" className="mt-6 flex items-center justify-center gap-2">
-            <button className={btn} disabled={safePage <= 1} onClick={() => setPage(safePage - 1)} aria-label="Previous page">
-              <ChevronLeft className="size-4" />
-            </button>
+        {!overview && totalPages > 1 && (
+          <nav aria-label="Pagination" className="flex items-center justify-center gap-2 pt-2">
+            <button className={pageBtn} disabled={safePage <= 1} onClick={() => setPage(safePage - 1)} aria-label="Previous page"><ChevronLeft className="size-4" /></button>
             {Array.from({ length: totalPages }, (_, i) => i + 1)
               .filter((n) => n === 1 || n === totalPages || Math.abs(n - safePage) <= 1)
               .map((n, i, arr) => (
                 <span key={n} className="flex items-center gap-2">
                   {i > 0 && n - arr[i - 1] > 1 && <span className="text-muted">…</span>}
                   <button onClick={() => setPage(n)} aria-current={n === safePage ? "page" : undefined}
-                    className={`${btn} ${n === safePage ? "bg-brand! border-brand! text-white!" : "text-muted"}`}>
-                    {n}
-                  </button>
+                    className={`${pageBtn} ${n === safePage ? "bg-brand! border-brand! text-white!" : "text-muted"}`}>{n}</button>
                 </span>
               ))}
-            <button className={btn} disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)} aria-label="Next page">
-              <ChevronRight className="size-4" />
-            </button>
+            <button className={pageBtn} disabled={safePage >= totalPages} onClick={() => setPage(safePage + 1)} aria-label="Next page"><ChevronRight className="size-4" /></button>
           </nav>
         )}
-        <p className="mt-4 text-center text-xs text-muted">
-          {filtered.length} service{filtered.length === 1 ? "" : "s"} · page {safePage} of {totalPages}
-        </p>
+        {!overview && (
+          <p className="text-center text-xs text-muted">
+            {filtered.length} service{filtered.length === 1 ? "" : "s"} · page {safePage} of {totalPages}
+          </p>
+        )}
       </section>
-    </>
+
+      {overview && (
+        <div className="grid gap-4 xl:grid-cols-5">
+          <section className="glass rounded-xl p-5 xl:col-span-2">
+            <h2 className="font-bold">System topology</h2>
+            <p className="label-mono mb-3 mt-1">Live connectivity · colour = latest status</p>
+            <Topology services={services} latest={latest} />
+          </section>
+          <section className="glass rounded-xl p-5 xl:col-span-3">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-bold">Recent executions</h2>
+                <p className="label-mono mt-1">Newest checks across your services</p>
+              </div>
+              <Link href="/logs" className="inline-flex items-center gap-1 text-xs font-semibold text-brand-2 hover:underline">
+                View all logs <ArrowRight className="size-3.5" />
+              </Link>
+            </div>
+            <RecentLogs rows={recent} services={services} />
+          </section>
+        </div>
+      )}
+    </div>
   );
 }

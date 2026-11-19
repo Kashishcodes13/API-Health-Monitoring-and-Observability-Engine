@@ -25,8 +25,8 @@ export function ForgotPasswordForm() {
   return (
     <AuthShell title="Reset your password" subtitle="We'll email you a link to choose a new one.">
       <form onSubmit={onSubmit} className="space-y-4">
-        <label className="block space-y-1.5 text-sm text-muted">
-          Email
+        <label className="block space-y-1.5">
+          <span className="label-mono">Email</span>
           <input name="email" type="email" required autoComplete="email" placeholder="you@gmail.com" className="input-glass" />
         </label>
         <Alerts error={error} notice={notice} />
@@ -35,7 +35,7 @@ export function ForgotPasswordForm() {
         </button>
       </form>
       <p className="text-center text-sm text-muted">
-        <Link href="/login" className="text-brand-2 hover:underline">Back to log in</Link>
+        <Link href="/login" className="font-semibold text-brand hover:underline">Back to log in</Link>
       </p>
     </AuthShell>
   );

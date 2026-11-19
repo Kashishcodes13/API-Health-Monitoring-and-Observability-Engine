@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <main className="mx-auto max-w-6xl px-5 py-6">
+    <div aria-busy="true">
       <div className="skeleton mb-5 h-5 w-40" />
       <div className="skeleton mb-6 h-28 w-full" />
       <div className="bento-grid">
@@ -8,6 +8,6 @@ export default function Loading() {
         <div className="skeleton h-80 md:col-span-4" />
         <div className="skeleton h-80 md:col-span-2" />
       </div>
-    </main>
+    </div>
   );
 }

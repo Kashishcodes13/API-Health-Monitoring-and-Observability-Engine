@@ -2,9 +2,9 @@ const PERIOD = "c120 -60 240 -60 360 0 s240 60 360 0 ";
 const PATH = `M0 80 ${PERIOD.repeat(4)}V200 H0 Z`;
 
 const layers = [
-  { cls: "animate-wave-slow", opacity: "opacity-40", from: "#6366f1", to: "#22d3ee", id: "w1", offset: "bottom-0 h-44" },
-  { cls: "animate-wave-mid", opacity: "opacity-35", from: "#22d3ee", to: "#10b981", id: "w2", offset: "bottom-0 h-36" },
-  { cls: "animate-wave-fast", opacity: "opacity-30", from: "#10b981", to: "#6366f1", id: "w3", offset: "bottom-0 h-28" },
+  { cls: "animate-wave-slow", opacity: "opacity-20", from: "#f43f5e", to: "#60a5fa", id: "w1", offset: "bottom-0 h-44" },
+  { cls: "animate-wave-mid", opacity: "opacity-15", from: "#60a5fa", to: "#a78bfa", id: "w2", offset: "bottom-0 h-36" },
+  { cls: "animate-wave-fast", opacity: "opacity-10", from: "#a78bfa", to: "#f43f5e", id: "w3", offset: "bottom-0 h-28" },
 ];
 
 export function Wave({ className = "" }: { className?: string }) {

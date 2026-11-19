@@ -6,7 +6,9 @@ import { requireUser } from "@/lib/frontend/auth";
 import type { CheckRow, IncidentRow } from "@/lib/frontend/types";
 import { TONE, normalizeCheck, pickNum, pickStr, sinceIso, timeAgo } from "@/lib/frontend/status";
 import { normalizeService } from "@/lib/frontend/service";
-import { bucketSeries, dailyUptime, distribution, nowMs } from "@/lib/frontend/analytics";
+import {
+  RANGES, RANGE_KEYS, bucketSeries, dailyUptime, distribution, nowMs, parseBuckets, type RangeKey,
+} from "@/lib/frontend/analytics";
 import { DistributionChart, LatencyChart } from "@/components/ChartsLazy";
 import { ServiceActions } from "@/components/ServiceActions";
 import { HistoryTable } from "@/components/HistoryTable";
@@ -15,12 +17,6 @@ import { LocalTime } from "@/components/LocalTime";
 
 export const metadata: Metadata = { title: "Service" };
 
-const RANGES = {
-  "24h": { hours: 24, bucket: 30 },
-  "7d": { hours: 168, bucket: 240 },
-  "30d": { hours: 720, bucket: 720 },
-} as const;
-type RangeKey = keyof typeof RANGES;
 const STATES = ["all", "healthy", "degraded", "down"] as const;
 const HIST_PAGE = 15;
 const COLS = "service_id,checked_at,state,status_code,response_time_ms,error_message";
@@ -67,13 +63,14 @@ export default async function ServicePage({
     .range(hFrom, hFrom + HIST_PAGE - 1);
   if (state !== "all") histQ = histQ.eq("state", state);
 
-  const [latestRes, uptimeRes, rangeRes, incRes, histRes] = await Promise.all([
+  const [latestRes, uptimeRes, rangeRes, incRes, histRes, bucketRes] = await Promise.all([
     supabase.from("health_checks").select("*").eq("service_id", id).order("checked_at", { ascending: false }).limit(1),
     supabase.rpc("daily_uptime", { p_service_id: id, p_days: 30 }),
     supabase.from("health_checks").select(COLS).eq("service_id", id).gte("checked_at", sinceIso(rg.hours))
       .order("checked_at", { ascending: false }).limit(3000),
     supabase.from("incidents").select("*").eq("service_id", id).order("checked_at", { ascending: false }).limit(10),
     histQ,
+    supabase.rpc("latency_buckets", { p_service_id: id, p_hours: rg.hours, p_bucket_minutes: rg.bucket }),
   ]);
 
   const latest: CheckRow | null = latestRes.data?.[0] ? normalizeCheck(latestRes.data[0]) : null;
@@ -82,7 +79,9 @@ export default async function ServicePage({
 
   // charts are computed from raw checks so they work whatever the RPC column names are
   const rangeChecks = ((rangeRes.data ?? []) as unknown[]).map(normalizeCheck);
-  const latency = bucketSeries(rangeChecks, now, rg.hours, rg.bucket);
+  // database-side buckets cover the whole range; fall back to the loaded checks if the function is unavailable
+  const dbBuckets = bucketRes.error ? [] : parseBuckets(bucketRes.data);
+  const latency = dbBuckets.length ? dbBuckets : bucketSeries(rangeChecks, now, rg.hours, rg.bucket);
   const dist = distribution(rangeChecks);
 
   let uptimeDays = ((uptimeRes.data ?? []) as unknown[]).map((r) => ({
@@ -108,7 +107,7 @@ export default async function ServicePage({
     p == null ? "bg-text/10" : p >= 99.9 ? "bg-healthy/85" : p >= 95 ? "bg-degraded" : "bg-down";
 
   return (
-    <main className="mx-auto max-w-6xl px-5 py-6">
+    <main>
       <Link href="/dashboard" className="mb-5 inline-flex items-center gap-1.5 text-sm text-muted transition hover:text-text">
         <ArrowLeft className="size-4" /> Back to dashboard
       </Link>
@@ -131,10 +130,10 @@ export default async function ServicePage({
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">History</h2>
         <div className="glass flex rounded-2xl p-1" role="tablist" aria-label="Time range">
-          {(Object.keys(RANGES) as RangeKey[]).map((r) => (
+          {RANGE_KEYS.map((r) => (
             <Link key={r} href={link({ range: r, hpage: "1" })} scroll={false}
-              className={`rounded-xl px-3.5 py-1.5 text-xs transition ${r === range ? "bg-white text-brand shadow-sm" : "text-muted hover:text-text"}`}>
-              {r === "24h" ? "24 hours" : r === "7d" ? "7 days" : "30 days"}
+              className={`rounded-xl px-3.5 py-1.5 text-xs transition ${r === range ? "bg-brand text-white" : "text-muted hover:text-text"}`}>
+              {RANGES[r].label}
             </Link>
           ))}
         </div>
@@ -159,7 +158,7 @@ export default async function ServicePage({
         </section>
 
         <section className="glass bento-card md:col-span-4">
-          <h2 className="mb-3 font-semibold">Latency · last {range}</h2>
+          <h2 className="mb-3 font-semibold">Latency · last {RANGES[range].label}</h2>
           <LatencyChart data={latency} range={range} />
         </section>
 
@@ -174,7 +173,7 @@ export default async function ServicePage({
             <div className="flex gap-1.5 text-xs">
               {STATES.map((st) => (
                 <Link key={st} href={link({ state: st, hpage: "1" })} scroll={false}
-                  className={`rounded-lg px-2.5 py-1 capitalize transition ${st === state ? "bg-white text-brand shadow-sm" : "text-muted hover:text-text"}`}>
+                  className={`rounded-lg px-2.5 py-1 capitalize transition ${st === state ? "bg-brand text-white" : "text-muted hover:text-text"}`}>
                   {st}
                 </Link>
               ))}

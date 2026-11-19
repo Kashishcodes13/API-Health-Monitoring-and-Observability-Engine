@@ -48,7 +48,7 @@ export function AddServiceModal({ keys = DEFAULT_KEYS }: { keys?: FieldKeys }) {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="fixed inset-0 z-50 grid place-items-center bg-slate-900/35 p-4 backdrop-blur-sm"
+            className="fixed inset-0 z-50 grid place-items-center bg-black/65 p-4 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -83,7 +83,7 @@ export function AddServiceModal({ keys = DEFAULT_KEYS }: { keys?: FieldKeys }) {
                 <label className="block space-y-1.5 text-sm text-muted">
                   Method
                   <select name="method" defaultValue="GET" className="input-glass">
-                    {METHODS.map((m) => <option key={m} value={m} className="bg-white">{m}</option>)}
+                    {METHODS.map((m) => <option key={m} value={m} className="bg-ink-2">{m}</option>)}
                   </select>
                 </label>
                 <label className="block space-y-1.5 text-sm text-muted">

@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   description: "Monitor your APIs in real time. Instant status, latency charts, uptime history and incident tracking.",
 };
 
-export const viewport: Viewport = { themeColor: "#f4f6fc", colorScheme: "light" };
+export const viewport: Viewport = { themeColor: "#070b16", colorScheme: "dark" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

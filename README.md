@@ -36,23 +36,23 @@ Private by design: every account sees only the endpoints it added.
 ## Features
 
 **Public site**
-- Light glassmorphism landing page with an animated wave, a bento feature grid and a short how-it-works section. It shows no live or customer data.
+- Dark landing page with an animated wave, a bento feature grid and a short how-it-works section. It shows no live or customer data.
 
 **Accounts**
 - Email and password sign-up and login (any address, including Gmail).
 - Forgot-password and reset-password by email.
 - Login is mandatory for the app. Signing out returns you to the landing page.
 
-**Dashboard**
-- Live status cards that glow emerald, amber or rose as each check lands (Supabase Realtime).
-- Stats for the last 24 hours: uptime ring, healthy / degraded / down counts, average latency.
-- Latency chart per service, status mix donut, and a trend line inside every card.
-- Search by name or URL, filter by status, paging.
-- **Add service** form and a **Check now** button on every card.
-- **Auto-monitor** probes every active service once a minute while the dashboard is open.
+**Console (signed-in area)**
+- Sidebar navigation: Dashboard, API Services, Incidents, Execution Logs. On phones the sidebar slides in as a drawer.
+- **Dashboard:** KPI tiles (24-hour uptime, monitored endpoints with a healthy / degraded / down bar, average latency, active incidents), an **API response time chart with 1h, 12h, 24h, 7d and 30d ranges**, a latency distribution panel, live service cards, a service topology map and a recent-executions table.
+- **API Services:** the full list with search, status filter and paging.
+- **Incidents:** services failing right now, plus every state change with time, HTTP code and reason.
+- **Execution Logs:** every probe, newest first, filtered by health or service, paged, refreshing itself every 15 seconds.
+- Live status cards update the moment a check lands (Supabase Realtime), with **Add service**, **Check now** and **Auto-monitor** (probes every active service once a minute while the page is open).
 
 **Service detail page**
-- History for 24 hours, 7 days or 30 days.
+- History for 1 hour, 12 hours, 24 hours, 7 days or 30 days.
 - 30-day uptime bar, latency chart with the 500 ms threshold, and latency distribution.
 - Paged check log with a status filter.
 - State-change timeline (for example `healthy → down`) and the latest response headers.
@@ -177,16 +177,19 @@ Notes:
 ```
 app/
 ├─ page.tsx                   Landing page (static, no data)
-├─ login/ register/           Email + password auth
+├─ login/ register/           Email + password auth (split-screen layout)
 ├─ forgot-password/ reset-password/
 ├─ auth/callback/             Handles confirm-email and reset-password links
 ├─ auth/signout/              POST: signs out, redirects to the landing page
-├─ dashboard/                 Stats, charts, cards, search, filter, paging
-└─ services/[id]/             History, check log, charts, state changes, headers
-components/                   UI: StatusCard, Charts, ChartsLazy, StatsBento, AddServiceModal, ...
+├─ dashboard/                 KPIs, response-time chart, services, topology, recent runs
+├─ services/                  API Services list, and services/[id] for history and details
+├─ incidents/                 Active incidents and state-change timeline
+└─ logs/                      Execution log with filters and paging
+components/                   AppShell (sidebar), DashboardClient, StatusCard, KpiTiles, Charts, Topology, ...
 lib/frontend/
 ├─ auth.ts                    requireUser(): cached, verified session lookup
-├─ analytics.ts               Pure functions: stats, series, sparklines, histograms
+├─ data.ts                    Shared loader for the dashboard and services pages
+├─ analytics.ts               Pure functions: stats, series, bands, ranges, sparklines
 ├─ service.ts                 Detects your services column names; search filter
 ├─ status.ts                  Row normalisers and formatting helpers
 ├─ actions.ts                 The only file that calls the server actions
@@ -223,8 +226,13 @@ The existing backend lives alongside this: `lib/supabase/*`, `lib/health/*`, `ap
 | "url is invalid" or "formData.get is not a function" when adding a service | The add action reads `FormData`. See `lib/frontend/actions.ts`, the only file to adjust |
 | Dashboard empty after running `06` | Your existing services have no owner yet. Assign them with the `UPDATE` in the SQL file |
 | No confirmation email arrives | Supabase's built-in mailer is rate limited. Turn off **Confirm email** while testing |
+| Chart looks empty for 7d or 30d | History only exists for the time checks have been running. Add a scheduled call to `/api/health-check` |
 | Cards never update live | Add `health_checks` and `services` to the `supabase_realtime` publication |
 | History has gaps | Nothing is checking while the dashboard is closed. Add a scheduled call to `/api/health-check` |
+
+## Upgrading from an earlier version
+
+Extract over your project with **Replace all**, stop the dev server, delete `.next`, and start again. `components/StatsBento.tsx` is no longer used and can be deleted. The latency chart reads the `latency_buckets()` database function; if it is unavailable the chart falls back to the checks already loaded.
 
 ## Roadmap
 

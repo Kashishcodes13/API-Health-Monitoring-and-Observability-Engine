@@ -2,18 +2,17 @@
 import { memo } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowUpRight, PauseCircle } from "lucide-react";
+import { ChevronRight, PauseCircle } from "lucide-react";
 import type { CheckRow, ServiceRow } from "@/lib/frontend/types";
 import { TONE, timeAgo } from "@/lib/frontend/status";
 import { CheckNowButton } from "./CheckNowButton";
 import { Sparkline } from "./Sparkline";
 
-const SPARK = { healthy: "#10b981", degraded: "#f59e0b", down: "#f43f5e", unknown: "#94a3b8" } as const;
-const PILL = { healthy: "bg-healthy/10", degraded: "bg-degraded/10", down: "bg-down/10", unknown: "bg-text/5" } as const;
+const SPARK = { healthy: "#22c55e", degraded: "#f59e0b", down: "#ef4444", unknown: "#64748b" } as const;
 
 function StatusCardBase({
-  service, check, spark = [], now,
-}: { service: ServiceRow; check?: CheckRow; spark?: (number | null)[]; now?: number }) {
+  service, check, spark = [], uptime = null, now,
+}: { service: ServiceRow; check?: CheckRow; spark?: (number | null)[]; uptime?: number | null; now?: number }) {
   const paused = service.is_active === false;
   const status = paused ? "unknown" : (check?.status ?? "unknown");
   const tone = TONE[status];
@@ -21,48 +20,57 @@ function StatusCardBase({
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 14 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.96 }}
-      transition={{ type: "spring", stiffness: 260, damping: 26 }}
-      className={`glass relative flex flex-col gap-3 overflow-hidden rounded-3xl p-5 pl-6 ${tone.glow} ${tone.text}`}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
+      className={`glass flex flex-col gap-3 rounded-xl p-4 transition-colors hover:border-text/25 ${status === "down" ? "glow-down" : status === "degraded" ? "glow-degraded" : ""}`}
     >
-      <span aria-hidden className="absolute inset-y-4 left-0 w-1.5 rounded-r-full bg-current opacity-80" />
-
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Link href={`/services/${service.id}`} className="group inline-flex max-w-full items-center gap-1 font-semibold text-text">
-            <span className="truncate group-hover:text-brand">{service.name}</span>
-            <ArrowUpRight className="size-4 shrink-0 text-muted transition group-hover:text-brand" />
-          </Link>
-          <span className="mt-0.5 block truncate font-mono text-xs text-muted">
-            {service.url ? service.url.replace(/^https?:\/\//, "") : "no URL"}
-          </span>
-        </div>
-        <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${PILL[status]}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="rounded-md bg-text/8 px-2 py-0.5 font-mono text-[11px] font-bold tracking-wide text-muted">
+          {(service.method ?? "GET").toUpperCase()}
+        </span>
+        <span className={`inline-flex items-center gap-1.5 font-mono text-[11px] font-bold uppercase tracking-wide ${tone.text}`}>
           {paused ? <PauseCircle className="size-3.5" /> : <span className="status-dot" />}
           {paused ? "Paused" : tone.label}
         </span>
       </div>
 
-      <Sparkline values={spark} color={SPARK[status]} id={`s-${service.id.slice(0, 6)}`} />
+      <div className="min-w-0">
+        <Link href={`/services/${service.id}`} className="block truncate text-[15px] font-semibold hover:text-brand-2">
+          {service.name}
+        </Link>
+        <span className="block truncate font-mono text-xs text-muted">
+          {service.url ? service.url.replace(/^https?:\/\//, "") : "no URL"}
+        </span>
+      </div>
 
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-3">
         <div>
-          <div className="font-mono text-3xl font-semibold tracking-tight text-text">
+          <div className="font-mono text-2xl font-semibold tracking-tight">
             {showMs ? check!.latency_ms : "—"}
-            {showMs && <span className="ml-1 text-sm font-medium text-muted">ms</span>}
+            {showMs && <span className="ml-0.5 text-sm font-medium text-muted">ms</span>}
           </div>
-          <div className="mt-1 text-xs text-muted">
-            {check ? `HTTP ${check.status_code ?? "n/a"} · ${timeAgo(check.checked_at, now)}` : "Waiting for first check"}
-          </div>
+          <div className="label-mono mt-0.5">{uptime == null ? "No uptime data" : `${uptime.toFixed(2)}% uptime`}</div>
         </div>
-        <CheckNowButton serviceId={service.id} />
+        <Sparkline values={spark} color={SPARK[status]} id={`s-${service.id.slice(0, 6)}`} className="h-10 w-28" />
       </div>
 
       {check?.error && status === "down" && (
-        <p className="truncate rounded-xl bg-down/8 px-3 py-1.5 font-mono text-xs text-down">{check.error}</p>
+        <p className="truncate rounded-md bg-down/10 px-2.5 py-1.5 font-mono text-[11px] text-down">{check.error}</p>
       )}
+
+      <div className="mt-auto flex items-center justify-between border-t border-line pt-3">
+        <span className="text-[11px] text-muted">
+          {check ? `HTTP ${check.status_code ?? "n/a"} · ${timeAgo(check.checked_at, now)}` : "Waiting for first check"}
+        </span>
+        <div className="flex items-center gap-2">
+          <CheckNowButton serviceId={service.id} />
+          <Link href={`/services/${service.id}`} className="inline-flex items-center text-xs font-semibold text-brand-2 hover:underline">
+            Details <ChevronRight className="size-3.5" />
+          </Link>
+        </div>
+      </div>
     </motion.article>
   );
 }
@@ -73,5 +81,5 @@ const sameSpark = (a?: (number | null)[], b?: (number | null)[]) =>
 /** Re-renders only when this card's own data changes, not on every realtime event for other services. */
 export const StatusCard = memo(
   StatusCardBase,
-  (p, n) => p.service === n.service && p.check === n.check && p.now === n.now && sameSpark(p.spark, n.spark),
+  (p, n) => p.service === n.service && p.check === n.check && p.now === n.now && p.uptime === n.uptime && sameSpark(p.spark, n.spark),
 );
